@@ -134,8 +134,8 @@
 
         .dpad {
             display: grid;
-            grid-template-columns: 50px 50px 50px;
-            grid-template-rows: 50px 50px 50px;
+            grid-template-columns: 40px 40px 40px;
+            grid-template-rows: 40px 40px 40px;
         }
         .dpad-btn {
             background: #111;
@@ -152,7 +152,7 @@
         
         #dpad-up { grid-column: 2; grid-row: 1; border-radius: 5px 5px 0 0; border-bottom: none; }
         #dpad-left { grid-column: 1; grid-row: 2; border-radius: 5px 0 0 5px; border-right: none; }
-        .dpad-center { grid-column: 2; grid-row: 2; background: #111; border: none; box-shadow: none; }
+        .dpad-center { grid-column: 2; grid-row: 2; background: #111; border: none; box-shadow: none; pointer-events: none; }
         #dpad-right { grid-column: 3; grid-row: 2; border-radius: 0 5px 5px 0; border-left: none; }
         #dpad-down { grid-column: 2; grid-row: 3; border-radius: 0 0 5px 5px; border-top: none; }
 
@@ -189,6 +189,15 @@
         @media (max-width: 768px) {
             #mobile-controls { display: flex; }
             canvas { max-width: calc(65vh * (640 / 480)); } 
+            
+            #top-bar {
+                justify-content: center;
+                gap: 5px;
+            }
+            .top-btn {
+                padding: 6px 8px;
+                font-size: 9px;
+            }
         }
     </style>
 </head>
@@ -206,6 +215,10 @@
             <span class="modal-close" id="close-modal">X</span>
             <h2>VERSION HISTORY</h2>
             <ul>
+                <li><span><span class="version-tag">[1.0.13]</span> Added soft-drop input lockout requiring players to release and re-press the down key between pieces.</span></li>
+                <li><span><span class="version-tag">[1.0.12]</span> Added Level Select screen, integrated custom 7x7 sprite coordinates, and fixed a bug where tapping the center of the mobile D-Pad caused block rotation.</span></li>
+                <li><span><span class="version-tag">[1.0.11]</span> Added 1-point scoring system for soft-dropping pieces per grid space.</span></li>
+                <li><span><span class="version-tag">[1.0.10]</span> Shrunk D-Pad dimensions and reduced top bar button size to prevent squishing on mobile screens.</span></li>
                 <li><span><span class="version-tag">[1.0.9]</span> Updated sprite rendering resolution to map 7x7 pixel source blocks.</span></li>
                 <li><span><span class="version-tag">[1.0.8]</span> Changed controls to A/D/S for movement and Left/Right mouse clicks for rotation.</span></li>
                 <li><span><span class="version-tag">[1.0.7]</span> Adjusted Panic Mode to trigger at row 5 instead of row 10 to match classic NES Tetris behavior.</span></li>
@@ -259,6 +272,7 @@
     let lastTime = 0;
     let frameCounter = 0;
     
+    let startLevel = 0;
     let level = 0;
     let score = 0;
     let lines = 0;
@@ -293,6 +307,9 @@
     let dasCounter = 0;
     let dasActive = false;
     let currentDir = 0;
+    
+    // New variable to prevent soft-drop carryover between blocks
+    let softDropLocked = false;
 
     const spriteSheet = new Image();
     const homeAsset = new Image();
@@ -340,9 +357,10 @@
         for (let r = 0; r < 20; r++) playfield[r].fill(0);
         score = 0;
         lines = 0;
-        level = 0;
+        level = startLevel;
         pieceStats = { 'T': 0, 'J': 0, 'Z': 0, 'O': 0, 'S': 0, 'L': 0, 'I': 0 };
         nextPiece = { matrix: [], name: '' };
+        softDropLocked = false;
         
         gameState = 'PLAYING';
         pauseBtn.innerText = 'Pause (Enter)';
@@ -368,9 +386,11 @@
     
     pauseBtn.addEventListener('click', () => {
         if (gameState === 'TITLE') {
+            gameState = 'LEVEL_SELECT';
+        } else if (gameState === 'LEVEL_SELECT') {
             startGame();
         } else if (gameState === 'GAME_OVER') {
-            startGame();
+            gameState = 'TITLE';
         } else {
             togglePause();
         }
@@ -424,7 +444,6 @@
 
     function checkPanicMode() {
         let isPanic = false;
-        // Check if any blocks reach or cross row 5 (indices 0 through 5)
         for (let r = 0; r <= 5; r++) {
             if (playfield[r].some(cell => cell !== 0)) {
                 isPanic = true;
@@ -485,6 +504,9 @@
     }
 
     function lockPiece() {
+        // Lock out soft-drop carrying over to the next spawned piece
+        softDropLocked = true;
+
         for (let r = 0; r < currentPiece.matrix.length; r++) {
             for (let c = 0; c < currentPiece.matrix[r].length; c++) {
                 if (currentPiece.matrix[r][c]) {
@@ -543,7 +565,7 @@
                 localStorage.setItem('nesTetrisHighScore', highScore);
             }
             
-            level = Math.floor(lines / 10);
+            level = startLevel + Math.floor(lines / 10);
         }
         spawnPiece();
     }
@@ -574,11 +596,18 @@
             currentDir = 0; dasCounter = 0; dasActive = false;
         }
 
-        if (keys.s && frameCounter % 2 === 0) {
+        // Only soft drop if the key isn't locked out from a previous piece placement
+        if (keys.s && !softDropLocked && frameCounter % 2 === 0) {
             currentPiece.row++;
             if (!isValidMove(currentPiece.matrix, currentPiece.row, currentPiece.col)) {
                 currentPiece.row--;
                 lockPiece();
+            } else {
+                score += 1;
+                if (score > highScore) {
+                    highScore = score;
+                    localStorage.setItem('nesTetrisHighScore', highScore);
+                }
             }
         }
     }
@@ -618,23 +647,21 @@
         const blockType = nesBlockTypes[name];
 
         const spriteCoords = {
-            0: [ {x: 8, y: 16}, {x: 8, y: 48}, {x: 8, y: 80} ], // blues
-            1: [ {x: 128, y: 16}, {x: 128, y: 48}, {x: 128, y: 80} ], // greens
-            2: [ {x: 248, y: 16}, {x: 248, y: 48}, {x: 248, y: 80} ], // pinks
-            3: [ {x: 348, y: 16}, {x: 348, y: 48}, {x: 348, y: 80} ], // blue+green
-            4: [ {x: 488, y: 16}, {x: 488, y: 48}, {x: 488, y: 80} ], // red+green
-            5: [ {x: 8, y: 280}, {x: 8, y: 312}, {x: 8, y: 344} ], // blue+greenv2
-            6: [ {x: 128, y: 280}, {x: 128, y: 312}, {x: 128, y: 344} ], // red+gray
-            7: [ {x: 248, y: 280}, {x: 248, y: 312}, {x: 248, y: 344} ], // red+purple
-            8: [ {x: 368, y: 280}, {x: 368, y: 312}, {x: 368, y: 344} ], // red+blue
-            9: [ {x: 488, y: 280}, {x: 488, y: 312}, {x: 488, y: 344} ] // red+orange
+            0: [ {x: 8, y: 16}, {x: 8, y: 48}, {x: 8, y: 80} ],
+            1: [ {x: 128, y: 16}, {x: 128, y: 48}, {x: 128, y: 80} ],
+            2: [ {x: 248, y: 16}, {x: 248, y: 48}, {x: 248, y: 80} ],
+            3: [ {x: 368, y: 16}, {x: 368, y: 48}, {x: 368, y: 80} ],
+            4: [ {x: 488, y: 16}, {x: 488, y: 48}, {x: 488, y: 80} ],
+            5: [ {x: 8, y: 280}, {x: 8, y: 312}, {x: 8, y: 344} ],
+            6: [ {x: 128, y: 280}, {x: 128, y: 312}, {x: 128, y: 344} ],
+            7: [ {x: 248, y: 280}, {x: 248, y: 312}, {x: 248, y: 344} ],
+            8: [ {x: 368, y: 280}, {x: 368, y: 312}, {x: 368, y: 344} ],
+            9: [ {x: 488, y: 280}, {x: 488, y: 312}, {x: 488, y: 344} ]
         };
 
         if (spriteSheet.complete && spriteSheet.naturalHeight !== 0 && spriteCoords[colorLevel]) {
             const coords = spriteCoords[colorLevel][blockType];
-            
-            if (coords.x !== 0 || coords.y !== 0) { 
-                // Changed from 8, 8 to 7, 7 to match 7x7 pixel source blocks
+            if (coords) { 
                 ctx.drawImage(spriteSheet, coords.x, coords.y, 7, 7, x, y, size, size);
             }
         }
@@ -681,7 +708,48 @@
                 ctx.fillStyle = '#d82e00';
                 ctx.fillText('PRESS ENTER / A / B TO START', canvas.width / 2, boxY + 34);
             }
+            return;
+        }
 
+        if (gameState === 'LEVEL_SELECT') {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            const boxW = 380;
+            const boxH = 150;
+            const boxX = (canvas.width - boxW) / 2;
+            const boxY = (canvas.height - boxH) / 2;
+
+            drawPanel(boxX, boxY, boxW, boxH);
+
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#d82e00';
+            ctx.font = '16px "Press Start 2P", monospace';
+            ctx.fillText('CHOOSE LEVEL', canvas.width / 2, boxY + 45);
+
+            ctx.font = '16px "Press Start 2P", monospace';
+            for (let i = 0; i <= 9; i++) {
+                const numX = boxX + 41 + (i * 33);
+                if (i === startLevel) {
+                    if (Math.floor(frameCounter / 15) % 2 === 0) {
+                        ctx.fillStyle = '#d82e00';
+                    } else {
+                        ctx.fillStyle = '#fff';
+                    }
+                    ctx.fillText(i, numX, boxY + 95);
+                    ctx.fillStyle = '#d82e00';
+                    ctx.fillRect(numX - 8, boxY + 100, 16, 4);
+                } else {
+                    ctx.fillStyle = '#555';
+                    ctx.fillText(i, numX, boxY + 95);
+                }
+            }
+
+            if (Math.floor(frameCounter / 30) % 2 === 0) {
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px "Press Start 2P", monospace';
+                ctx.fillText('PRESS ENTER / A / B TO START', canvas.width / 2, boxY + 130);
+            }
             return;
         }
 
@@ -717,7 +785,7 @@
         ctx.fillStyle = '#fff';
         ctx.fillText('LINES-' + String(lines).padStart(3, '0'), PLAYFIELD_X + 25, 40);
         
-        // Box 1: Top / Score (Height: 95)
+        // Box 1: Top / Score
         drawPanel(450, 25, 160, 95);
         ctx.fillText('TOP', 465, 48);
         ctx.fillText(String(highScore).padStart(6, '0'), 465, 71);
@@ -756,12 +824,12 @@
             }
         }
         
-        // Box 3: Level (Height: 65)
+        // Box 3: Level
         drawPanel(450, 241, 160, 65);
         ctx.fillText('LEVEL', 485, 268);
         ctx.fillText(String(level).padStart(2, '0'), 510, 292);
 
-        // --- Clean Desktop Controls Text Legend ---
+        // --- Desktop Controls Text Legend ---
         if (window.innerWidth > 768) {
             ctx.font = '8px "Press Start 2P", monospace'; 
             ctx.fillStyle = '#aaa';
@@ -797,7 +865,6 @@
                 }
             }
             
-            // Do not render the active piece if we are animating clear lines, so it flashes properly
             if (currentPiece.matrix.length && gameState !== 'PAUSED' && gameState !== 'ANIMATING_LINES') {
                 for (let r = 0; r < currentPiece.matrix.length; r++) {
                     for (let c = 0; c < currentPiece.matrix[r].length; c++) {
@@ -852,11 +919,24 @@
     window.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key.toLowerCase() === 'p') {
             if (gameState === 'TITLE') {
+                gameState = 'LEVEL_SELECT';
+            } else if (gameState === 'LEVEL_SELECT') {
                 startGame();
             } else if (gameState === 'GAME_OVER') {
-                startGame();
+                gameState = 'TITLE';
             } else {
                 togglePause();
+            }
+            return;
+        }
+
+        if (gameState === 'LEVEL_SELECT') {
+            if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') {
+                startLevel = Math.max(0, startLevel - 1);
+                playSound('move');
+            } else if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') {
+                startLevel = Math.min(9, startLevel + 1);
+                playSound('move');
             }
             return;
         }
@@ -869,23 +949,27 @@
     
     window.addEventListener('keyup', (e) => {
         const key = e.key.toLowerCase();
-        if (keys.hasOwnProperty(key)) keys[key] = false;
+        if (keys.hasOwnProperty(key)) {
+            keys[key] = false;
+        }
+        // Unlock soft drop on physical key release
+        if (key === 's') {
+            softDropLocked = false;
+        }
     });
 
     // --- Mouse Rotation Integration ---
-    window.addEventListener('mousedown', (e) => {
+    window.addEventListener('pointerdown', (e) => {
+        if (e.pointerType !== 'mouse') return;
         if (gameState !== 'PLAYING') return;
 
-        // Ensure we're targeting rotation appropriately
         if (e.button === 0) {
-            // Left click: Counter-clockwise
             const rotated = rotateMatrix(currentPiece.matrix, -1);
             if (isValidMove(rotated, currentPiece.row, currentPiece.col)) {
                 currentPiece.matrix = rotated;
                 playSound('rotate');
             }
         } else if (e.button === 2) {
-            // Right click: Clockwise
             const rotated = rotateMatrix(currentPiece.matrix, 1);
             if (isValidMove(rotated, currentPiece.row, currentPiece.col)) {
                 currentPiece.matrix = rotated;
@@ -902,12 +986,25 @@
             e.preventDefault(); 
             
             if (gameState === 'TITLE' && isRotate) {
-                startGame();
+                gameState = 'LEVEL_SELECT';
+                return;
+            }
+
+            if (gameState === 'LEVEL_SELECT') {
+                if (isRotate) {
+                    startGame();
+                } else if (key === 'a') {
+                    startLevel = Math.max(0, startLevel - 1);
+                    playSound('move');
+                } else if (key === 'd') {
+                    startLevel = Math.min(9, startLevel + 1);
+                    playSound('move');
+                }
                 return;
             }
 
             if (gameState === 'GAME_OVER' && isRotate) {
-                startGame();
+                gameState = 'TITLE';
                 return;
             }
 
@@ -925,12 +1022,23 @@
         
         el.addEventListener('touchend', (e) => { 
             e.preventDefault(); 
-            if (!isRotate) keys[key] = false; 
+            if (!isRotate) {
+                keys[key] = false; 
+                // Unlock soft drop on touch release
+                if (key === 's') {
+                    softDropLocked = false;
+                }
+            }
         });
 
         el.addEventListener('touchcancel', (e) => {
             e.preventDefault();
-            if (!isRotate) keys[key] = false;
+            if (!isRotate) {
+                keys[key] = false;
+                if (key === 's') {
+                    softDropLocked = false;
+                }
+            }
         });
     };
 
