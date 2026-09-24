@@ -215,6 +215,7 @@
             <span class="modal-close" id="close-modal">X</span>
             <h2>VERSION HISTORY</h2>
             <ul>
+                <li><span><span class="version-tag">[1.0.14]</span> Fixed an issue where clicking the top UI buttons with the mouse would accidentally rotate the active block.</span></li>
                 <li><span><span class="version-tag">[1.0.13]</span> Added soft-drop input lockout requiring players to release and re-press the down key between pieces.</span></li>
                 <li><span><span class="version-tag">[1.0.12]</span> Added Level Select screen, integrated custom 7x7 sprite coordinates, and fixed a bug where tapping the center of the mobile D-Pad caused block rotation.</span></li>
                 <li><span><span class="version-tag">[1.0.11]</span> Added 1-point scoring system for soft-dropping pieces per grid space.</span></li>
@@ -962,6 +963,11 @@
     window.addEventListener('pointerdown', (e) => {
         if (e.pointerType !== 'mouse') return;
         if (gameState !== 'PLAYING') return;
+        
+        // Do not rotate if clicking on buttons, the top bar, or UI elements
+        if (e.target.closest('#top-bar') || e.target.tagName.toLowerCase() === 'button' || e.target.closest('.modal-content')) {
+            return;
+        }
 
         if (e.button === 0) {
             const rotated = rotateMatrix(currentPiece.matrix, -1);
